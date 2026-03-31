@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>3D Куб: Индивидуальный проект</title>
+    <style>
+        body { margin: 0; overflow: hidden; background: #121212; font-family: sans-serif; }
+        #ui {
+            position: absolute; top: 20px; width: 100%; text-align: center;
+            color: white; pointer-events: none; z-index: 10;
+        }
+        .status { font-size: 24px; font-weight: bold; margin-bottom: 10px; }
+        .score { font-size: 18px; color: #aaa; }
+        #winner-msg { 
+            position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+            color: gold; font-size: 40px; font-weight: bold; display: none;
+            text-shadow: 0 0 20px rgba(255,215,0,0.5);
+        }
+    </style>
+</head>
+<body>
+    <div id="ui">
+        <div id="turn" class="status">Ход: <span style="color: #ff4444;">Крестики (X)</span></div>
+        <div id="score" class="score">Побед на гранях — X: 0 | O: 0</div>
+    </div>
+    <div id="winner-msg">ПОБЕДА В ИГРЕ!</div>
+
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+            }
+        }
+    </script>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+        // Состояние игры
+        let currentPlayer = 'X';
+        let scores = { X: 0, O: 0 };
+        const cells = [];
+        const facesData = {}; // Хранение состояния каждой грани
+
+        const scene = new THREE.Scene();
+        const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        document.body.appendChild(renderer.domElement);
+
+        const controls = new OrbitControls(camera, renderer.domElement);
+        camera.position.set(6, 6, 6);
+
+        const group = new THREE.Group();
+        scene.add(group);
+
+        const geometry = new THREE.BoxGeometry(0.9, 0.9, 0.1);
+
+        function createFace(name, rotX, rotY, rotZ) {
+            const facePivot = new THREE.Object3D();
+            facesData[name] = Array(9).fill(null); // 0-8 ячейки грани
+            facesData[name + "_won"] = false;
+
+            let cellIdx = 0;
+            for (let y = 1; y >= -1; y--) {
+                for (let x = -1; x <= 1; x++) {
+                    const mat = new THREE.MeshBasicMaterial({ color: 0x333333 });
+                    const cell = new THREE.Mesh(geometry, mat);
+                    
+                    cell.position.set(x, y, 1.52);
+                    cell.userData = { face: name, index: cellIdx };
+                    
+                    const edges = new THREE.EdgesGeometry(geometry);
+                    const line = new THREE.LineSegments(edges, new THREE.LineBasicMaterial({ color: 0x777777 }));
+                    cell.add(line);
+
+                    facePivot.add(cell);
+                    cells.push(cell);
+                    cellIdx++;
+                }
+            }
+            
+            facePivot.rotation.set(rotX, rotY, rotZ);
+            group.add(facePivot);
+        }
+
+        // Инициализация куба
+        const f = Math.PI/2;
+        createFace('front',  0, 0, 0);
+        createFace('back',   0, Math.PI, 0);
+        createFace('top',    -f, 0, 0);
+        createFace('bottom', f, 0, 0);
+        createFace('right',  0, f, 0);
+        createFace('left',   0, -f, 0);
+
+        const raycaster = new THREE.Raycaster();
+        const mouse = new THREE.Vector2();
+
+        window.addEventListener('click', (event) => {
+    // 1. Более точный расчет координат мыши
+    const rect = renderer.domElement.getBoundingClientRect();
+    mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+    mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+
+    raycaster.setFromCamera(mouse, camera);
+    
+    // 2. Ищем пересечения только с мешами (клетками)
+    const intersects = raycaster.intersectObjects(cells, false);
+
+    // 3. ПРОВЕРКА: Если ничего не нашли, выходим из функции
+    if (intersects.length === 0) return;
+
+    const cell = intersects[0].object;
+
+    // 4. ЗАЩИТА: Проверяем, есть ли у объекта нужные нам данные
+    if (!cell || !cell.userData) return;
+
+    const { face, index } = cell.userData;
+
+    // 5. Проверяем, определены ли переменные face и index
+    if (face === undefined || index === undefined) return;
+
+    if (facesData[face][index] === null) {
+        // Делаем ход
+        facesData[face][index] = currentPlayer;
+        cell.material.color.set(currentPlayer === 'X' ? 0xff4444 : 0x4444ff);
+        
+        checkFaceWin(face);
+        
+        // Смена игрока
+        currentPlayer = currentPlayer === 'X' ? 'O' : 'X';
+        const color = currentPlayer === 'X' ? '#ff4444' : '#4444ff';
+        const name = currentPlayer === 'X' ? 'Крестики (X)' : 'Нолики (O)';
+        document.getElementById('turn').innerHTML = `Ход: <span style="color: ${color};">${name}</span>`;
+    }
+});
+
+        function checkFaceWin(faceName) {
+            if (facesData[faceName + "_won"]) return;
+
+            const grid = facesData[faceName];
+            const winPatterns = [
+                [0,1,2], [3,4,5], [6,7,8], // горизонтали
+                [0,3,6], [1,4,7], [2,5,8], // вертикали
+                [0,4,8], [2,4,6]           // диагонали
+            ];
+
+            for (let pattern of winPatterns) {
+                const [a, b, c] = pattern;
+                if (grid[a] && grid[a] === grid[b] && grid[a] === grid[c]) {
+                    facesData[faceName + "_won"] = true;
+                    scores[grid[a]]++;
+                    updateScore();
+                    
+                    // Визуальный эффект победы на грани (подсветка)
+                    highlightWin(faceName, grid[a]);
+                    return;
+                }
+            }
+        }
+
+        function highlightWin(faceName, winner) {
+            cells.forEach(c => {
+                if (c.userData.face === faceName && facesData[faceName][c.userData.index] === winner) {
+                    c.scale.set(1.1, 1.1, 1.1); // немного увеличиваем победные клетки
+                }
+            });
+            
+            if (scores[winner] >= 3) {
+                document.getElementById('winner-msg').style.display = 'block';
+                document.getElementById('winner-msg').innerText = `ПОБЕДИЛИ ${winner === 'X' ? 'КРЕСТИКИ' : 'НОЛИКИ'}!`;
+            }
+        }
+
+        function updateScore() {
+            document.getElementById('score').innerText = `Побед на гранях — X: ${scores.X} | O: ${scores.O}`;
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+            controls.update();
+            renderer.render(scene, camera);
+        }
+        animate();
+
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+    </script>
+</body>
+</html>
